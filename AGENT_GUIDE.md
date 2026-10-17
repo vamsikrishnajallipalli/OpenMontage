@@ -46,6 +46,10 @@ This is a first-class workflow in OpenMontage.
 
 If a model misses this distinction, it will often fall back to plain search + guesswork. That is incorrect for OpenMontage.
 
+## Editable, reviewable video proofs
+
+For founder-directed, reference-driven or cinematic work where the acceptance object is a **watchable editable film**, read [`skills/meta/editable-video-proof.md`](skills/meta/editable-video-proof.md) and apply its six bounded jobs **within** the selected existing pipeline. Do not invent a separate production scheduler. Keep source assets stable while editing the timeline; ensure that output duration is derived from source trims and playback speeds, not from source end timecodes. A passing tool call or a render file alone does not prove that the intended motion, pacing and audio are accepted.
+
 ## Rule Zero — All Production Goes Through a Pipeline
 
 **Every video production request MUST go through the pipeline system. No exceptions.**
