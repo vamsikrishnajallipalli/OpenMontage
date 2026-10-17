@@ -79,6 +79,14 @@ class CompositionValidator(BaseTool):
                     "ffmpeg→composition's parent. Explicit assets_root wins."
                 ),
             },
+            "asset_manifest_path": {
+                "type": "string",
+                "description": (
+                    "Optional asset_manifest.json. Canonical cut sources may be "
+                    "asset IDs, not filesystem paths. A sibling manifest beside "
+                    "edit_decisions.json is also auto-detected."
+                ),
+            },
         },
     }
 
@@ -180,19 +188,49 @@ class CompositionValidator(BaseTool):
         # --- Check 3: Source trim/order validated by nominal_duration_seconds ---
         # Sorting by source in_seconds would scramble editorial cut order.
 
-        # --- Check 4: Asset files exist ---
+        # --- Check 4: Asset IDs and source files exist ---
+        # Canonical edit_decisions.cuts[].source may be an asset_manifest ID.
+        # Inspect the sibling manifest by default, matching video_compose's
+        # ID-to-path resolution, and don't assume that project assets live
+        # under remotion-composer/public.
+        manifest_setting = inputs.get("asset_manifest_path")
+        manifest_path = (
+            Path(manifest_setting) if manifest_setting
+            else comp_path.parent / "asset_manifest.json"
+        )
+        asset_lookup: dict[str, str] = {}
+        project_root = (
+            manifest_path.parent.parent if manifest_path.parent.name == "artifacts"
+            else manifest_path.parent
+        )
+        if manifest_setting and not manifest_path.is_file():
+            errors.append(f"Asset manifest not found: {manifest_path}")
+        elif manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                for item in manifest.get("assets", []):
+                    asset_lookup[item["id"]] = item["path"]
+            except (ValueError, KeyError, TypeError) as exc:
+                errors.append(f"Invalid asset manifest {manifest_path}: {exc}")
+
+        def present(source: str) -> bool:
+            real_source = asset_lookup.get(source, source)
+            candidate = Path(real_source)
+            return any(p.is_file() for p in (
+                candidate, assets_root / candidate, project_root / candidate,
+                comp_path.parent / candidate,
+            ))
+
         for cut in cuts:
             source = cut.get("source", "")
-            if source:
-                asset_path = assets_root / source
-                if not asset_path.exists():
-                    errors.append(f"Missing asset: {source} (looked in {assets_root})")
-
+            if source and not present(source):
+                errors.append(
+                    f"Missing asset: {source} "
+                    f"(checked manifest, project, composition and render roots)"
+                )
             bg_img = cut.get("backgroundImage", "")
-            if bg_img:
-                bg_path = assets_root / bg_img
-                if not bg_path.exists():
-                    errors.append(f"Missing background image: {bg_img}")
+            if bg_img and not present(bg_img):
+                errors.append(f"Missing background image: {bg_img}")
 
         # --- Check 5: Narration duration vs video duration ---
         narration = audio.get("narration", {})
