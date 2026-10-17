@@ -1,10 +1,10 @@
 """Pre-render composition validator.
 
-Checks an ExplainerProps JSON for common issues before rendering:
+Checks an edit-decisions/ExplainerProps JSON for common issues before rendering:
 - Missing asset files (images, audio)
 - Narration duration exceeding video duration
 - Music duration shorter than video (warning)
-- Overlapping or out-of-order cuts
+- Malformed trims, duplicate IDs, non-finite timings and invalid playback speeds
 - Required fields present
 
 Run this before every render to catch problems that would otherwise
@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from lib.edit_timeline_duration import nominal_duration_seconds
 from tools.analysis.audio_probe import probe_duration
 from tools.base_tool import (
     BaseTool,
@@ -161,24 +162,23 @@ class CompositionValidator(BaseTool):
             errors.append("No cuts defined in composition")
             return self._result(errors, warnings, info, start)
 
-        # --- Check 2: Video duration ---
-        video_duration = 0.0
-        for cut in cuts:
-            out_s = cut.get("out_seconds", 0)
-            if out_s > video_duration:
-                video_duration = out_s
-        info.append(f"Video duration: {video_duration}s ({len(cuts)} cuts)")
+        # --- Check 2: Nominal final video duration and cut integrity ---
+        # A cut's in/out are offsets within its *source*, never positions in
+        # the output timeline. Primary cuts concatenate in list order; speed
+        # changes playback length and overlays must not extend the runtime.
+        try:
+            video_duration = nominal_duration_seconds(cuts)
+        except ValueError as exc:
+            errors.append(str(exc))
+            return self._result(errors, warnings, info, start)
+        info.append(
+            f"Nominal video duration: {video_duration}s ({len(cuts)} cuts; "
+            "before transition overlaps — verify final MP4 with ffprobe)"
+        )
         info.append(f"Render runtime: {runtime or 'default (remotion)'}; assets root: {assets_root}")
 
-        # --- Check 3: Cut ordering and gaps ---
-        sorted_cuts = sorted(cuts, key=lambda c: c.get("in_seconds", 0))
-        for i, cut in enumerate(sorted_cuts):
-            in_s = cut.get("in_seconds", 0)
-            out_s = cut.get("out_seconds", 0)
-            if out_s <= in_s:
-                errors.append(
-                    f"Cut '{cut.get('id', i)}': out_seconds ({out_s}) <= in_seconds ({in_s})"
-                )
+        # --- Check 3: Source trim/order validated by nominal_duration_seconds ---
+        # Sorting by source in_seconds would scramble editorial cut order.
 
         # --- Check 4: Asset files exist ---
         for cut in cuts:
